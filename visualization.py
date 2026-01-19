@@ -1,44 +1,42 @@
-import matplotlib.pyplot as plt
-import networkx as nx
+import folium
 
 
-def visualize_traffic(G, regular_routes, emergency_routes):
-    pos = nx.spring_layout(G, seed=42)
+def visualize_traffic_map(
+    G,
+    user_route,
+    emergency_routes,
+    regular_routes,
+    user_start,
+    user_end
+):
+    # Center map at USER start
+    m = folium.Map(location=user_start, zoom_start=13)
 
-    fig, ax = plt.subplots(figsize=(10, 8))
+    # Start & End markers
+    folium.Marker(
+        user_start,
+        popup="Your Start",
+        icon=folium.Icon(color="orange", icon="play")
+    ).add_to(m)
 
-    # Base graph
-    nx.draw(
-        G, pos,
-        node_size=5,
-        edge_color="lightgray",
-        with_labels=False,
-        ax=ax
-    )
+    folium.Marker(
+        user_end,
+        popup="Your Destination",
+        icon=folium.Icon(color="red", icon="stop")
+    ).add_to(m)
 
-    # Regular routes (blue)
-    for route in regular_routes:
-        edges = [(route[i], route[i+1]) for i in range(len(route)-1)]
-        nx.draw_networkx_edges(
-            G, pos,
-            edgelist=edges,
-            edge_color="blue",
-            width=2,
-            alpha=0.6,
-            ax=ax
-        )
+    # USER ROUTE (ORANGE)
+    user_coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in user_route]
+    folium.PolyLine(user_coords, color="orange", weight=6).add_to(m)
 
-    # Emergency routes (green)
+    # EMERGENCY ROUTES (GREEN)
     for route in emergency_routes:
-        edges = [(route[i], route[i+1]) for i in range(len(route)-1)]
-        nx.draw_networkx_edges(
-            G, pos,
-            edgelist=edges,
-            edge_color="green",
-            width=3,
-            ax=ax
-        )
+        coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
+        folium.PolyLine(coords, color="green", weight=4, opacity=0.8).add_to(m)
 
-    ax.set_title("Green: Emergency Corridors | Blue: Regular Traffic")
-    return fig
-#D:\mini_project\Quantum-Traffic-Priority-Routing\visualization.py
+    # REGULAR ROUTES (BLUE)
+    for route in regular_routes:
+        coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
+        folium.PolyLine(coords, color="blue", weight=2, opacity=0.5).add_to(m)
+
+    return m
