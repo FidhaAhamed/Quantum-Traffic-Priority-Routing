@@ -4,18 +4,27 @@ app.py
 Streamlit demo for Priority-Aware Quantum Traffic Optimization
 with Emergency Vehicle Green Corridors.
 
+This file orchestrates:
+- Network building
+- Traffic simulation
+- QUBO formulation
+- Optimization (quantum-ready)
+- Visualization
+
 Author: Your Team
 """
 
 import streamlit as st
-import matplotlib.pyplot as plt
-import networkx as nx
 
-# Project modules
+# --------------------------------------------------
+# PROJECT MODULE IMPORTS
+# --------------------------------------------------
+
 from network_builder import build_network_pipeline
 from traffic_simulator import build_traffic_scenario
 from qubo_builder import build_priority_aware_qubo
 from solver import solve_traffic_qubo
+from visualization import visualize_traffic
 
 
 # --------------------------------------------------
@@ -38,8 +47,8 @@ st.subheader("Emergency Vehicle Green Corridor Demonstration")
 st.sidebar.header("Simulation Controls")
 
 place = st.sidebar.text_input(
-    "Enter City / Area",
-    value="Kochi, India"
+    "City / Area",
+    value="Fort Kochi, India"
 )
 
 num_vehicles = st.sidebar.slider(
@@ -56,68 +65,35 @@ emergency_ratio = st.sidebar.slider(
     value=0.3
 )
 
-solve_button = st.sidebar.button("Run Optimization")
+solver_type = st.sidebar.selectbox(
+    "Optimization Method",
+    ["Simulated Annealing (Local)", "Quantum-Hybrid (D-Wave)"]
+)
+
+run_button = st.sidebar.button("Run Optimization")
 
 
 # --------------------------------------------------
-# HELPER: DRAW GRAPH
+# MAIN EXECUTION PIPELINE
 # --------------------------------------------------
 
-def draw_graph(G, routes=None, emergency_routes=None):
-    pos = nx.spring_layout(G, seed=42)
+if run_button:
 
-    plt.figure(figsize=(10, 8))
+    # -------------------------------
+    # 1. BUILD ROAD NETWORK
+    # -------------------------------
+    st.info("Building real-world road network...")
 
-    # Draw base graph
-    nx.draw(
-        G, pos,
-        node_size=5,
-        edge_color="lightgray",
-        with_labels=False
-    )
-
-    # Draw regular routes
-    if routes:
-        for route in routes.values():
-            edges = [(route[i], route[i + 1]) for i in range(len(route) - 1)]
-            nx.draw_networkx_edges(
-                G, pos,
-                edgelist=edges,
-                edge_color="blue",
-                width=2,
-                alpha=0.6
-            )
-
-    # Draw emergency routes
-    if emergency_routes:
-        for route in emergency_routes:
-            edges = [(route[i], route[i + 1]) for i in range(len(route) - 1)]
-            nx.draw_networkx_edges(
-                G, pos,
-                edgelist=edges,
-                edge_color="green",
-                width=3
-            )
-
-    st.pyplot(plt.gcf())
-    plt.clf()
-
-
-# --------------------------------------------------
-# MAIN EXECUTION
-# --------------------------------------------------
-
-if solve_button:
-
-    st.info("Building road network and simulating traffic...")
-
-    # 1. Build network
     network_data = build_network_pipeline(
         place_name=place,
         num_vehicles=num_vehicles
     )
 
-    # 2. Simulate traffic
+    # -------------------------------
+    # 2. SIMULATE TRAFFIC
+    # -------------------------------
+    st.info("Simulating traffic scenario...")
+
     scenario = build_traffic_scenario(
         network_data,
         emergency_ratio=emergency_ratio
@@ -126,28 +102,38 @@ if solve_button:
     G = scenario["graph"]
     vehicles = scenario["vehicles"]
 
-    # Identify emergency vehicles
     emergency_vehicles = [v for v in vehicles if v["type"] == "emergency"]
 
     st.success(f"Total Vehicles: {len(vehicles)}")
     st.success(f"Emergency Vehicles: {len(emergency_vehicles)}")
 
-    # 3. Build QUBO
-    st.info("Formulating Priority-Aware QUBO...")
+    # -------------------------------
+    # 3. BUILD PRIORITY-AWARE QUBO
+    # -------------------------------
+    st.info("Formulating Priority-Aware QUBO model...")
+
     bqm, variable_map = build_priority_aware_qubo(vehicles)
 
-    # 4. Solve QUBO
+    # -------------------------------
+    # 4. SOLVE OPTIMIZATION PROBLEM
+    # -------------------------------
     st.info("Solving optimization problem...")
-    selected_routes = solve_traffic_qubo(
-        bqm,
-        variable_map,
-        vehicles,
-        method="sa"  # simulated annealing
-    )
 
-    # Separate emergency routes
+    method = "sa" if "Simulated" in solver_type else "dwave"
+
+    with st.spinner("Running quantum-ready optimization..."):
+        selected_routes = solve_traffic_qubo(
+            bqm=bqm,
+            variable_map=variable_map,
+            vehicles=vehicles,
+            method=method
+        )
+
+    # -------------------------------
+    # 5. SEPARATE ROUTES
+    # -------------------------------
     emergency_routes = []
-    regular_routes = {}
+    regular_routes = []
 
     for v in vehicles:
         vid = v["vehicle_id"]
@@ -155,32 +141,38 @@ if solve_button:
             if v["type"] == "emergency":
                 emergency_routes.append(selected_routes[vid])
             else:
-                regular_routes[vid] = selected_routes[vid]
+                regular_routes.append(selected_routes[vid])
 
-    # 5. Visualization
+    # -------------------------------
+    # 6. VISUALIZATION
+    # -------------------------------
     st.subheader("🗺️ Optimized Traffic Flow")
-    st.caption("Green = Emergency Corridor | Blue = Regular Traffic")
+    st.caption("🟩 Green = Emergency Corridors | 🟦 Blue = Regular Traffic")
 
-    draw_graph(
+    fig = visualize_traffic(
         G,
-        routes=regular_routes,
+        regular_routes=regular_routes,
         emergency_routes=emergency_routes
     )
 
-    # 6. Results Summary
+    st.pyplot(fig)
+
+    # -------------------------------
+    # 7. RESULTS SUMMARY
+    # -------------------------------
     st.subheader("📊 Optimization Summary")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("### Emergency Vehicles")
+        st.markdown("### 🚑 Emergency Vehicles")
         for v in emergency_vehicles:
-            st.write(f"Vehicle {v['vehicle_id']} → Priority Route Assigned")
+            st.write(f"Vehicle {v['vehicle_id']} → Priority route assigned")
 
     with col2:
-        st.markdown("### Regular Vehicles")
-        for vid in regular_routes.keys():
-            st.write(f"Vehicle {vid} → Optimized Route Assigned")
+        st.markdown("### 🚗 Regular Vehicles")
+        for i, _ in enumerate(regular_routes):
+            st.write(f"Vehicle {i} → Optimized route assigned")
 
 else:
-    st.info("Set parameters and click **Run Optimization** to start.")
+    st.info("Set parameters in the sidebar and click **Run Optimization** to start.")
