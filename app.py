@@ -7,8 +7,8 @@ with Emergency Vehicle Green Corridors.
 USER POV workflow:
 - Auto-build initial traffic scenario on first load
 - Show current traffic (blue = regular, green = emergency)
-- Allow user to enter start/destination coords, snap to graph nodes, show ORIGINAL path (thin orange)
-- On "Optimize Route" run QUBO including the user as a vehicle and show OPTIMIZED route (bold orange)
+- Allow user to enter start/destination, snap to graph nodes, show ORIGINAL path
+- On "Optimize Route" run QUBO including the user as a vehicle and show OPTIMIZED route
 
 Do NOT store folium.Map in session_state. Store only lightweight route/graph data.
 """
@@ -47,8 +47,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🚦 Priority-Aware Traffic — User POV")
-st.write("This demo shows current traffic, allows you to enter a start/destination, view the original path, and run an optimization that prioritizes emergency vehicles.")
+st.title("🚦 Priority-Aware Traffic Optimization")
+st.write("Enter your journey details to see how quantum optimization creates efficient routes while prioritizing emergency vehicles.")
 
 
 # --------------------------------------------------
@@ -87,156 +87,254 @@ solver_type = st.sidebar.selectbox(
     ["Simulated Annealing (Local)", "Quantum-Hybrid (D-Wave)"]
 )
 
-
 run_button = st.sidebar.button("Run Simulation")
 
-# --- New inputs: explicit user start/end coordinates (latitude/longitude)
+# --------------------------------------------------
+# USER ROUTE INPUTS
+# --------------------------------------------------
 st.sidebar.markdown("---")
-st.sidebar.markdown("### User route inputs (optional)")
-user_start_lat = st.sidebar.number_input("User Start Latitude", value=0.0, format="%.6f")
-user_start_lon = st.sidebar.number_input("User Start Longitude", value=0.0, format="%.6f")
-user_end_lat = st.sidebar.number_input("User Destination Latitude", value=0.0, format="%.6f")
-user_end_lon = st.sidebar.number_input("User Destination Longitude", value=0.0, format="%.6f")
+st.sidebar.markdown("### 📍 Your Journey")
 
-optimize_button = st.sidebar.button("Optimize Route")
+user_start_addr = st.sidebar.text_input(
+    "From", 
+    "Fort Kochi",
+    help="Enter your starting location"
+)
+
+user_end_addr = st.sidebar.text_input(
+    "To", 
+    "Ernakulam",
+    help="Enter your destination"
+)
+
+# Auto-geocode addresses to coordinates
+user_start_lat, user_start_lon = 0.0, 0.0
+user_end_lat, user_end_lon = 0.0, 0.0
+
+def smart_geocode(address, city, graph=None):
+    """
+    Smart geocoding with multiple fallback strategies.
+    """
+    # Strategy 1: Try full address
+    attempts = [
+        f"{address}, {city}",
+        f"{address}, India",
+        address,
+    ]
+    
+    for attempt in attempts:
+        try:
+            location = ox.geocode(attempt)
+            return location  # Returns (lat, lon)
+        except:
+            continue
+    
+    # Strategy 2: If we have a graph, use its center as fallback
+    if graph is not None:
+        try:
+            # Get graph bounding box center
+            nodes_gdf = ox.graph_to_gdfs(graph, nodes=True, edges=False)
+            center = nodes_gdf.unary_union.centroid
+            return (center.y, center.x)
+        except:
+            pass
+    
+    # Strategy 3: Default to Fort Kochi coordinates
+    return (9.9674, 76.2425)  # Fort Kochi area
+
+# Only geocode if graph is loaded and addresses are provided
+if user_start_addr and user_end_addr and st.session_state.get("graph") is not None:
+    G = st.session_state.get("graph")
+    
+    # Geocode start
+    try:
+        start_location = smart_geocode(user_start_addr, place, G)
+        user_start_lat, user_start_lon = start_location
+        start_success = True
+    except Exception as e:
+        st.sidebar.warning(f"⚠️ Using approximate location for start")
+        user_start_lat, user_start_lon = 9.9674, 76.2425
+        start_success = False
+    
+    # Geocode end
+    try:
+        end_location = smart_geocode(user_end_addr, place, G)
+        user_end_lat, user_end_lon = end_location
+        end_success = True
+    except Exception as e:
+        st.sidebar.warning(f"⚠️ Using approximate location for destination")
+        user_end_lat, user_end_lon = 9.9312, 76.2673
+        end_success = False
+    
+    # Show results
+    if start_success and end_success:
+        with st.sidebar.expander("📍 Found Locations", expanded=False):
+            st.success(f"✓ Start: {user_start_lat:.4f}, {user_start_lon:.4f}")
+            st.success(f"✓ End: {user_end_lat:.4f}, {user_end_lon:.4f}")
+    else:
+        st.sidebar.info("💡 Using approximate coordinates - results may vary")
+
+optimize_button = st.sidebar.button("🚀 Optimize My Route", type="primary")
+
 
 # --------------------------------------------------
 # AUTO-BUILD ON LOAD: build network & simulate traffic if not present
 # --------------------------------------------------
 if st.session_state.get("graph") is None:
-    with st.spinner("Building road network and initial traffic scenario..."):
-        network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles)
-        scenario = build_traffic_scenario(network_data, emergency_ratio=emergency_ratio)
+    with st.spinner("🌐 Loading road network..."):
+        try:
+            network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles)
+            scenario = build_traffic_scenario(network_data, emergency_ratio=emergency_ratio)
 
-        G = scenario["graph"]
-        vehicles = scenario["vehicles"]
+            G = scenario["graph"]
+            vehicles = scenario["vehicles"]
 
-        traffic_routes = {}
-        regular_routes = []
-        emergency_routes = []
+            traffic_routes = {}
+            regular_routes = []
+            emergency_routes = []
 
-        for v in vehicles:
-            vid = v["vehicle_id"]
-            candidates = v.get("candidate_routes", [])
-            chosen = candidates[0] if candidates else []
-            traffic_routes[vid] = chosen
-            if v.get("type") == "emergency":
-                emergency_routes.append(chosen)
-            else:
-                regular_routes.append(chosen)
+            for v in vehicles:
+                vid = v["vehicle_id"]
+                candidates = v.get("candidate_routes", [])
+                chosen = candidates[0] if candidates else []
+                traffic_routes[vid] = chosen
+                if v.get("type") == "emergency":
+                    emergency_routes.append(chosen)
+                else:
+                    regular_routes.append(chosen)
 
-        st.session_state["graph"] = G
-        st.session_state["vehicles"] = vehicles
-        st.session_state["traffic_routes"] = traffic_routes
-        st.session_state["regular_routes"] = regular_routes
-        st.session_state["emergency_routes"] = emergency_routes
+            st.session_state["graph"] = G
+            st.session_state["vehicles"] = vehicles
+            st.session_state["traffic_routes"] = traffic_routes
+            st.session_state["regular_routes"] = regular_routes
+            st.session_state["emergency_routes"] = emergency_routes
+            
+        except Exception as e:
+            st.error(f"❌ Failed to load network: {e}")
+            st.info("💡 Try a different city or check internet connection")
+            st.stop()
 
 
 # --------------------------------------------------
-# MAIN PIPELINE
+# RE-RUN SIMULATION (if button clicked)
 # --------------------------------------------------
-
 if run_button:
-    # Re-run building the scenario (manual trigger)
-    st.info("Rebuilding road network and traffic scenario...")
-    network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles)
-    scenario = build_traffic_scenario(network_data, emergency_ratio=emergency_ratio)
+    with st.spinner("🔄 Rebuilding traffic scenario..."):
+        try:
+            network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles)
+            scenario = build_traffic_scenario(network_data, emergency_ratio=emergency_ratio)
 
-    G = scenario["graph"]
-    vehicles = scenario["vehicles"]
+            G = scenario["graph"]
+            vehicles = scenario["vehicles"]
 
-    traffic_routes = {}
-    regular_routes = []
-    emergency_routes = []
+            traffic_routes = {}
+            regular_routes = []
+            emergency_routes = []
 
-    for v in vehicles:
-        vid = v["vehicle_id"]
-        candidates = v.get("candidate_routes", [])
-        chosen = candidates[0] if candidates else []
-        traffic_routes[vid] = chosen
-        if v.get("type") == "emergency":
-            emergency_routes.append(chosen)
-        else:
-            regular_routes.append(chosen)
+            for v in vehicles:
+                vid = v["vehicle_id"]
+                candidates = v.get("candidate_routes", [])
+                chosen = candidates[0] if candidates else []
+                traffic_routes[vid] = chosen
+                if v.get("type") == "emergency":
+                    emergency_routes.append(chosen)
+                else:
+                    regular_routes.append(chosen)
 
-    st.session_state["graph"] = G
-    st.session_state["vehicles"] = vehicles
-    st.session_state["traffic_routes"] = traffic_routes
-    st.session_state["regular_routes"] = regular_routes
-    st.session_state["emergency_routes"] = emergency_routes
+            st.session_state["graph"] = G
+            st.session_state["vehicles"] = vehicles
+            st.session_state["traffic_routes"] = traffic_routes
+            st.session_state["regular_routes"] = regular_routes
+            st.session_state["emergency_routes"] = emergency_routes
+            
+            st.success("✅ Traffic scenario rebuilt!")
+            
+        except Exception as e:
+            st.error(f"❌ Failed to rebuild: {e}")
 
-# If user provides coordinates (non-zero), snap and compute original route
-has_user_coords = not (
-    user_start_lat == 0.0
-    and user_start_lon == 0.0
-    and user_end_lat == 0.0
-    and user_end_lon == 0.0
-)
+
+# --------------------------------------------------
+# COMPUTE ORIGINAL ROUTE (if addresses provided)
+# --------------------------------------------------
+has_user_coords = not (user_start_lat == 0.0 and user_start_lon == 0.0 
+                       and user_end_lat == 0.0 and user_end_lon == 0.0)
 
 if has_user_coords and st.session_state.get("graph") is not None:
     G = st.session_state.get("graph")
     try:
         start_node = ox.nearest_nodes(G, user_start_lon, user_start_lat)
         end_node = ox.nearest_nodes(G, user_end_lon, user_end_lat)
+        
         try:
             original_route = nx.shortest_path(G, start_node, end_node, weight="length")
             st.session_state["original_route"] = original_route
+            st.sidebar.success(f"✓ Route found: {len(original_route)} waypoints")
         except Exception as e:
-            st.warning(f"Could not compute original shortest path: {e}")
+            st.sidebar.warning(f"⚠️ No path found: {e}")
             st.session_state["original_route"] = None
     except Exception as e:
-        st.warning(f"Could not snap user coordinates to graph nodes: {e}")
+        st.sidebar.warning(f"⚠️ Couldn't snap to road: {e}")
         st.session_state["original_route"] = None
 
-# Optimization: when user clicks optimize_button, include the user as a vehicle and solve
+
+# --------------------------------------------------
+# OPTIMIZATION (if button clicked)
+# --------------------------------------------------
 if optimize_button and st.session_state.get("graph") is not None:
     if st.session_state.get("original_route") is None:
-        st.warning("Please enter valid start/end coordinates (and ensure they snap to the graph) before optimizing.")
+        st.warning("⚠️ Please enter valid addresses first!")
+        st.info("💡 Make sure both 'From' and 'To' fields are filled and the map has loaded")
     else:
-        G = st.session_state.get("graph")
-        vehicles = list(st.session_state.get("vehicles") or [])
+        with st.spinner("⚛️ Running quantum optimization..."):
+            try:
+                G = st.session_state.get("graph")
+                vehicles = list(st.session_state.get("vehicles") or [])
 
-        user_orig = st.session_state.get("original_route")
-        user_start_node = user_orig[0]
-        user_end_node = user_orig[-1]
+                user_orig = st.session_state.get("original_route")
+                user_start_node = user_orig[0]
+                user_end_node = user_orig[-1]
 
-        # Build candidate routes for the user (k-shortest)
-        user_candidates = find_candidate_routes(G, user_start_node, user_end_node, k=3)
+                # Build candidate routes for user
+                user_candidates = find_candidate_routes(G, user_start_node, user_end_node, k=3)
 
-        # Create user vehicle and append
-        user_vid = len(vehicles)
-        user_vehicle = {
-            "vehicle_id": user_vid,
-            "origin": user_start_node,
-            "destination": user_end_node,
-            "type": "user",
-            "priority_weight": 1,
-            "candidate_routes": user_candidates,
-        }
-        vehicles.append(user_vehicle)
+                # Create user vehicle
+                user_vid = len(vehicles)
+                user_vehicle = {
+                    "vehicle_id": user_vid,
+                    "origin": user_start_node,
+                    "destination": user_end_node,
+                    "type": "user",
+                    "priority_weight": 1,
+                    "candidate_routes": user_candidates,
+                }
+                vehicles.append(user_vehicle)
 
-        st.info("Building priority-aware QUBO (including user vehicle)...")
-        bqm, variable_map = build_priority_aware_qubo(vehicles)
+                # Build QUBO
+                bqm, variable_map = build_priority_aware_qubo(vehicles)
 
-        st.info("Solving optimization problem...")
-        method = "sa" if "Simulated" in solver_type else "dwave"
+                # Solve
+                method = "sa" if "Simulated" in solver_type else "dwave"
+                selected_routes = solve_traffic_qubo(
+                    bqm=bqm,
+                    variable_map=variable_map,
+                    vehicles=vehicles,
+                    method=method,
+                )
 
-        selected_routes = solve_traffic_qubo(
-            bqm=bqm,
-            variable_map=variable_map,
-            vehicles=vehicles,
-            method=method,
-        )
+                optimized_route = selected_routes.get(user_vid)
+                if optimized_route:
+                    st.session_state["optimized_route"] = optimized_route
+                    st.success("✅ Route optimized successfully!")
+                else:
+                    st.warning("⚠️ Optimizer didn't find an alternative route")
+                    
+            except Exception as e:
+                st.error(f"❌ Optimization failed: {e}")
 
-        optimized_route = selected_routes.get(user_vid)
-        if optimized_route:
-            st.session_state["optimized_route"] = optimized_route
-        else:
-            st.warning("Optimizer did not return a route for the user.")
-else:
-    st.info("Set parameters and click **Run Optimization** to start.")
 
-# If we have a stored graph, rebuild the folium.Map each rerun from session_state
+# --------------------------------------------------
+# VISUALIZATION
+# --------------------------------------------------
 if st.session_state.get("graph") is not None:
     G = st.session_state.get("graph")
     emergency_routes = st.session_state.get("emergency_routes") or []
@@ -244,7 +342,7 @@ if st.session_state.get("graph") is not None:
     original_route = st.session_state.get("original_route")
     optimized_route = st.session_state.get("optimized_route")
 
-    # Compute user start/end for markers (prefer original_route then optimized_route)
+    # Get user markers
     if original_route and len(original_route) >= 1:
         start_node = original_route[0]
         end_node = original_route[-1]
@@ -260,6 +358,7 @@ if st.session_state.get("graph") is not None:
         user_start = (G.nodes[first_node]["y"], G.nodes[first_node]["x"])
         user_end = user_start
 
+    # Create map
     m = visualize_traffic_map(
         G=G,
         regular_routes=regular_routes,
@@ -270,7 +369,38 @@ if st.session_state.get("graph") is not None:
         user_end=user_end,
     )
 
-    st.subheader("🗺️ Traffic — User POV")
-    st_folium(m, width=1000, height=600)
+    # Display
+    st.subheader("🗺️ Traffic Optimization Map")
+    
+    # Legend
+    col_leg1, col_leg2, col_leg3, col_leg4 = st.columns(4)
+    col_leg1.markdown("🟦 **Regular Traffic**")
+    col_leg2.markdown("🟩 **Emergency Vehicles**")
+    col_leg3.markdown("🟥 **Your Original Route**")
+    col_leg4.markdown("🟧 **Your Optimized Route**")
+    
+    # Map
+    st_folium(m, width=1200, height=600)
+    
+    # Metrics (if user has route)
+    if original_route or optimized_route:
+        st.subheader("📊 Route Statistics")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if original_route:
+                st.metric("Original Route", f"{len(original_route)} nodes")
+        
+        with col2:
+            if optimized_route:
+                improvement = len(original_route) - len(optimized_route) if original_route else 0
+                st.metric("Optimized Route", f"{len(optimized_route)} nodes", 
+                         delta=f"{improvement:+d} nodes")
+        
+        with col3:
+            emergency_count = len([v for v in st.session_state.get("vehicles", []) 
+                                 if v.get("type") == "emergency"])
+            st.metric("Emergency Vehicles", emergency_count)
+
 else:
-    st.info("Waiting for network build...")
+    st.info("🌐 Loading network... Please wait")
