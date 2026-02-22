@@ -440,7 +440,7 @@ def build_network_pipeline(place_name, num_vehicles=5, use_cache=True,
     
     # Step 6: Find candidate routes
     print("Step 6/6: Finding candidate routes...")
-    k_routes = 2 if fast_mode else 3  # Fast mode uses fewer routes
+    k_routes = 3  # 3 candidate routes for sufficient green corridor alternatives
     
     routes = {}
     for i, (o, d) in enumerate(od_pairs, 1):
