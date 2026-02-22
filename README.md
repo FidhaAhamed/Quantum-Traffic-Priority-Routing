@@ -63,14 +63,14 @@ This project introduces a **Priority-Aware MTF (Mini-scale Traffic Flow)** syste
 
 ### 🖥️ Six Solver Backends
 
-| Method | Type | Token? | Best For |
-|--------|------|:------:|----------|
-| `neal` | D-Wave Neal SA | ❌ | **Default** — quantum-inspired, most realistic |
-| `sa` | dimod basic SA | ❌ | Lightweight fallback |
-| `tabu` | D-Wave Tabu Search | ❌ | Alternative for benchmarks |
-| `exact` | Brute-force | ❌ | Tiny problems (<20 vars), guarantees optimum |
-| `qpu` | `EmbeddingComposite(DWaveSampler())` | ✅ | **Direct QPU** — ideal for small MTF sub-problems |
-| `dwave` | `LeapHybridSampler` | ✅ | Large problems (100+ vars) |
+| Method | Type | Best For |
+|--------|------|----------|
+| `neal` | D-Wave Neal SA | **Default** — quantum-inspired, most realistic |
+| `sa` | dimod basic SA | Lightweight fallback |
+| `tabu` | D-Wave Tabu Search | Alternative for benchmarks |
+| `exact` | Brute-force | Tiny problems (<20 vars), guarantees optimum |
+| `qpu` | `EmbeddingComposite(DWaveSampler())` | **Direct QPU** — ideal for small MTF sub-problems |
+| `dwave` | `LeapHybridSampler` | Large problems (100+ vars) |
 
 > Every cloud solver gracefully falls back to Neal SA if unavailable — the app **never crashes**.
 
@@ -356,14 +356,4 @@ The benchmarking system validates the abstract's core claims by running the **sa
 
 ## 📜 License
 
-This project is licensed under the **MIT License**.
-
----
-
-## 👤 Author
-
-**Fidha Ahamed**
-
----
-
-> **Note:** This project uses D-Wave's `neal` Simulated Annealing sampler by default, which faithfully replicates quantum annealing behaviour locally. The MTF sub-problem architecture is fully compatible with D-Wave QPU hardware — switching requires only a solver configuration change (`method="qpu"`).
+This project is licensed under the **MIT License**
