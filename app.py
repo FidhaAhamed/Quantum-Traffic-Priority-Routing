@@ -24,8 +24,6 @@ import numpy as np
 # Project modules
 from network_builder import build_network_pipeline, find_candidate_routes
 from traffic_simulator import build_traffic_scenario
-from qubo_builder import build_priority_aware_qubo
-from solver import solve_traffic_qubo
 from visualization import visualize_traffic_map
 from priority_aware_mtf import (
     priority_aware_mtf_solve,
