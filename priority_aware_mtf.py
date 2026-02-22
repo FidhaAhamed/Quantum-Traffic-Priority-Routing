@@ -10,6 +10,7 @@ on a quantum-inspired solver (Neal SA / Tabu) or D-Wave QPU.
 Author: Fidha Ahamed
 """
 
+import random
 import dimod
 import numpy as np
 from collections import defaultdict
@@ -54,6 +55,13 @@ def build_cost_hamiltonian(vehicles, variable_map, graph,
                     Q[(var_i, var_j)] += gamma
 
     # ----- H_route_cost: prefer shorter routes, amplified for ESVs -----
+    # Pre-compute max cost across all candidate routes for proper normalisation
+    all_raw_costs = []
+    for v in vehicles:
+        for route in v.get("candidate_routes", []):
+            all_raw_costs.append(_compute_route_cost(route, graph))
+    max_cost = max(all_raw_costs) if all_raw_costs else 1.0
+
     for v in vehicles:
         vid = v["vehicle_id"]
         priority = v.get("priority_weight", 1)
@@ -61,7 +69,7 @@ def build_cost_hamiltonian(vehicles, variable_map, graph,
 
         for r_idx, route in enumerate(v.get("candidate_routes", [])):
             var = variable_map[(vid, r_idx)]
-            route_cost = _compute_route_cost(route, graph)
+            route_cost = _compute_route_cost(route, graph, max_cost=max_cost)
 
             weight = alpha * priority if is_emergency else alpha
             Q[(var, var)] += weight * route_cost
@@ -105,8 +113,14 @@ def build_cost_hamiltonian(vehicles, variable_map, graph,
     return dict(Q)
 
 
-def _compute_route_cost(route, graph):
-    """Compute normalised travel cost for a route."""
+def _compute_route_cost(route, graph, max_cost=None):
+    """Compute normalised travel cost for a route.
+
+    Args:
+        route: list of node IDs
+        graph: networkx graph with travel_time edge attributes
+        max_cost: reference value for normalisation; if None the raw total is returned
+    """
     total = 0.0
     for i in range(len(route) - 1):
         u, v = route[i], route[i + 1]
@@ -117,7 +131,9 @@ def _compute_route_cost(route, graph):
             total += data.get("travel_time", data.get("length", 1.0))
         else:
             total += 100.0
-    return total / max(total, 1.0)
+    if max_cost is None:
+        return total
+    return total / max(max_cost, 1.0)
 
 
 # ==================================================
@@ -244,17 +260,24 @@ def update_congestion(graph, selected_routes):
     """
     After solving a sub-problem, update edge congestion counts
     so subsequent sub-problems account for already-assigned routes.
+    Also recomputes travel_time to reflect updated congestion for
+    subsequent Hamiltonian builds.
     """
     for vid, route in selected_routes.items():
         for i in range(len(route) - 1):
             u, v = route[i], route[i + 1]
             if graph.has_edge(u, v):
                 if isinstance(graph[u][v], dict) and 0 in graph[u][v]:
-                    graph[u][v][0]["congestion"] = \
-                        graph[u][v][0].get("congestion", 0) + 1
+                    data = graph[u][v][0]
                 else:
-                    graph[u][v]["congestion"] = \
-                        graph[u][v].get("congestion", 0) + 1
+                    data = graph[u][v]
+                data["congestion"] = data.get("congestion", 0) + 1
+                # Recompute travel_time to reflect updated congestion
+                length_km = data.get("length", 100) / 1000.0
+                speed_kmph = max(data.get("speed", 40), 1)
+                base_time = (length_km / speed_kmph) * 60
+                congestion_factor = 1.0 + (data["congestion"] / 20.0)
+                data["travel_time"] = base_time * congestion_factor
 
 
 # ==================================================
@@ -385,13 +408,18 @@ def compute_solution_metrics(selected_routes, vehicles, graph):
     }
 
 
-def compare_standard_vs_priority(vehicles, graph, method="neal"):
+def compare_standard_vs_priority(vehicles, graph, method="neal", seed=42):
     """
     Run both standard (no priority) and priority-aware MTF,
     then compare results. This produces the evaluation data
     mentioned in the abstract.
+
+    Args:
+        seed (int): Random seed for reproducible comparisons.
     """
     # --- Standard optimization (all vehicles weight = 1) ---
+    random.seed(seed)
+    np.random.seed(seed)
     standard_vehicles = deepcopy(vehicles)
     for v in standard_vehicles:
         v["priority_weight"] = 1
@@ -403,6 +431,8 @@ def compare_standard_vs_priority(vehicles, graph, method="neal"):
     )
 
     # --- Priority-Aware optimization ---
+    random.seed(seed)
+    np.random.seed(seed)
     pri_routes, pri_metrics = priority_aware_mtf_solve(
         vehicles, graph,
         method=method,
