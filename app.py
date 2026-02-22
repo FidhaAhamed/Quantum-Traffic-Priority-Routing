@@ -20,6 +20,11 @@ import osmnx as ox
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
+import random
+
+# Set global random seeds for reproducible demo runs
+random.seed(42)
+np.random.seed(42)
 
 # Project modules
 from network_builder import build_network_pipeline, find_candidate_routes

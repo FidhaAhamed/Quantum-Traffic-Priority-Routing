@@ -35,7 +35,7 @@ def generate_vehicles(od_pairs, emergency_ratio=0.2):
             "origin": origin,
             "destination": destination,
             "type": "emergency" if idx in emergency_indices else "regular",
-            "priority_weight": 100 if idx in emergency_indices else 1
+            "priority_weight": 10 if idx in emergency_indices else 1
         }
         vehicles.append(vehicle)
 

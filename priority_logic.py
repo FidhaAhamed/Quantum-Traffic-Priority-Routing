@@ -1,6 +1,10 @@
 """
 priority_logic.py
 -----------------
+*** LEGACY / REFERENCE ONLY ***
+This file is superseded by priority_aware_mtf.py and is no longer imported
+by app.py or any active module. It is kept for reference purposes only.
+
 Implements priority-aware logic for traffic optimization.
 This module handles emergency vehicle prioritization and
 green corridor identification.

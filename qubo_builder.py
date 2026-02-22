@@ -1,6 +1,10 @@
 """
 qubo_builder.py
 ---------------
+*** LEGACY / REFERENCE ONLY ***
+This file is superseded by priority_aware_mtf.py and is no longer imported
+by app.py or any active module. It is kept for reference purposes only.
+
 Builds a Priority-Aware QUBO model for traffic optimization.
 Emergency vehicles are given higher weights so their routes
 are preferred during optimization.
