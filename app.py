@@ -87,9 +87,12 @@ _time_map = {
 }
 
 # Show sliders for visibility but override their values from the preset
-_ = st.sidebar.slider("(Preset) Number of Vehicles", 3, 20, _time_map[time_of_day]["num_vehicles"], key="_num_vis")
-_ = st.sidebar.slider("(Preset) Emergency Vehicle Ratio", 0.0, 1.0, _time_map[time_of_day]["emergency_ratio"], step=0.05, key="_em_vis")
+# Dynamically set the sliders based on time_of_day
+num_vehicles = _time_map[time_of_day]["num_vehicles"]
+emergency_ratio = _time_map[time_of_day]["emergency_ratio"]
 
+st.sidebar.slider("Number of Vehicles", 3, 20, num_vehicles)
+st.sidebar.slider("Emergency Vehicle Ratio", 0.0, 1.0, emergency_ratio, step=0.05)
 # Use preset values
 num_vehicles = _time_map[time_of_day]["num_vehicles"]
 emergency_ratio = _time_map[time_of_day]["emergency_ratio"]
