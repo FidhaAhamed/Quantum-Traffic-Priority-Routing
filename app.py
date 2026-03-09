@@ -79,23 +79,23 @@ time_of_day = st.sidebar.selectbox(
 
 # Preset mapping
 _time_map = {
-    "Early Morning": {"num_vehicles": 4, "emergency_ratio": 0.1},
-    "Morning": {"num_vehicles": 12, "emergency_ratio": 0.3},
-    "Noon": {"num_vehicles": 8, "emergency_ratio": 0.2},
-    "Evening": {"num_vehicles": 15, "emergency_ratio": 0.35},
-    "Night": {"num_vehicles": 5, "emergency_ratio": 0.15},
+    "Early Morning": {"num_vehicles": 10, "emergency_ratio": 0.1},
+    "Morning":       {"num_vehicles": 25, "emergency_ratio": 0.3},
+    "Noon":          {"num_vehicles": 18, "emergency_ratio": 0.2},
+    "Evening":       {"num_vehicles": 35, "emergency_ratio": 0.35},
+    "Night":         {"num_vehicles": 12, "emergency_ratio": 0.15},
 }
 
-# Show sliders for visibility but override their values from the preset
-# Dynamically set the sliders based on time_of_day
-num_vehicles = _time_map[time_of_day]["num_vehicles"]
-emergency_ratio = _time_map[time_of_day]["emergency_ratio"]
+# Time-of-day sets the DEFAULT slider values; the user can then override
+preset_vehicles = _time_map[time_of_day]["num_vehicles"]
+preset_ratio    = _time_map[time_of_day]["emergency_ratio"]
 
-st.sidebar.slider("Number of Vehicles", 3, 20, num_vehicles)
-st.sidebar.slider("Emergency Vehicle Ratio", 0.0, 1.0, emergency_ratio, step=0.05)
-# Use preset values
-num_vehicles = _time_map[time_of_day]["num_vehicles"]
-emergency_ratio = _time_map[time_of_day]["emergency_ratio"]
+num_vehicles = st.sidebar.slider(
+    "Number of Vehicles", 3, 50, preset_vehicles, key="num_vehicles_slider"
+)
+emergency_ratio = st.sidebar.slider(
+    "Emergency Vehicle Ratio", 0.0, 1.0, preset_ratio, step=0.05, key="emergency_ratio_slider"
+)
 
 solver_type = st.sidebar.selectbox(
     "Optimization Method",
@@ -197,7 +197,8 @@ optimize_button = st.sidebar.button("🚀 Optimize My Route", type="primary")
 if st.session_state.get("graph") is None:
     with st.spinner("🌐 Loading road network..."):
         try:
-            network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles)
+            _net_size = "large" if num_vehicles > 15 else "medium"
+            network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles, network_size=_net_size)
             scenario = build_traffic_scenario(network_data, emergency_ratio=emergency_ratio)
 
             G = scenario["graph"]
@@ -235,7 +236,8 @@ if st.session_state.get("graph") is None:
 if run_button:
     with st.spinner("🔄 Rebuilding traffic scenario..."):
         try:
-            network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles)
+            _net_size = "large" if num_vehicles > 15 else "medium"
+            network_data = build_network_pipeline(place_name=place, num_vehicles=num_vehicles, network_size=_net_size)
             scenario = build_traffic_scenario(network_data, emergency_ratio=emergency_ratio)
 
             G = scenario["graph"]
