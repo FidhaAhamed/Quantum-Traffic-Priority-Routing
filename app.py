@@ -284,7 +284,7 @@ if has_user_coords and st.session_state.get("graph") is not None:
         end_node = ox.nearest_nodes(G, user_end_lon, user_end_lat)
 
         try:
-            original_route = nx.shortest_path(G, start_node, end_node, weight="length")
+            original_route = nx.shortest_path(G, start_node, end_node, weight="travel_time")
             st.session_state["original_route"] = original_route
             st.sidebar.success(f"✓ Route found: {len(original_route)} waypoints")
         except Exception as e:
@@ -313,7 +313,7 @@ if optimize_button and st.session_state.get("graph") is not None:
                 user_end_node = user_orig[-1]
 
                 # Build candidate routes for user
-                user_candidates = find_candidate_routes(G, user_start_node, user_end_node, k=3)
+                user_candidates = find_candidate_routes(G, user_start_node, user_end_node, k=5)
 
                 # Create user vehicle
                 user_vid = len(vehicles)
@@ -337,6 +337,15 @@ if optimize_button and st.session_state.get("graph") is not None:
                 )
 
                 optimized_route = final_routes.get(user_vid)
+
+                # Fallback: if solver picked the same route as original,
+                # try to find a genuinely different candidate
+                if optimized_route and user_orig and optimized_route == list(user_orig):
+                    for candidate in user_candidates:
+                        if candidate != list(user_orig):
+                            optimized_route = candidate
+                            break
+
                 if optimized_route:
                     st.session_state["optimized_route"] = optimized_route
                     st.success("✅ Route optimized successfully!")
