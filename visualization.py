@@ -54,19 +54,31 @@ def visualize_traffic_map(
 
     # REGULAR ROUTES (BLUE)
     if regular_routes:
-        for route in regular_routes:
+        for idx, route in enumerate(regular_routes):
             if not route:
                 continue
             coords = [_safe_node_latlon(G, n) for n in route]
-            folium.PolyLine(coords, color="blue", weight=2, opacity=0.6).add_to(m)
+            folium.PolyLine(coords, color="blue", weight=3, opacity=0.7, tooltip=f"Regular Vehicle #{idx + 1}").add_to(m)
+            folium.CircleMarker(
+                coords[0], radius=4, color="blue", fill=True, fill_color="blue",
+                fill_opacity=0.8, tooltip=f"Regular #{idx + 1} start"
+            ).add_to(m)
 
     # EMERGENCY ROUTES (GREEN)
     if emergency_routes:
-        for route in emergency_routes:
+        for idx, route in enumerate(emergency_routes):
             if not route:
                 continue
             coords = [_safe_node_latlon(G, n) for n in route]
-            folium.PolyLine(coords, color="green", weight=4, opacity=0.9).add_to(m)
+            folium.PolyLine(coords, color="green", weight=5, opacity=0.9, tooltip=f"🚨 Emergency Vehicle #{idx + 1}").add_to(m)
+            folium.CircleMarker(
+                coords[0], radius=6, color="green", fill=True, fill_color="lime",
+                fill_opacity=0.9, tooltip=f"Emergency #{idx + 1} start"
+            ).add_to(m)
+            folium.CircleMarker(
+                coords[-1], radius=6, color="darkred", fill=True, fill_color="red",
+                fill_opacity=0.9, tooltip=f"Emergency #{idx + 1} dest"
+            ).add_to(m)
 
     # ORIGINAL USER ROUTE (RED dashed, weight=3)
     if original_route:
