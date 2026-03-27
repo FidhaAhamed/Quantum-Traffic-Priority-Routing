@@ -9,6 +9,8 @@ Author: Your Team
 
 import random
 
+_EMERGENCY_SUBTYPES = ["ambulance", "fire_truck", "police"]
+
 
 # --------------------------------------------------
 # 1. CREATE VEHICLES (REGULAR + EMERGENCY)
@@ -30,12 +32,14 @@ def generate_vehicles(od_pairs, emergency_ratio=0.2):
     emergency_indices = set(random.sample(range(len(od_pairs)), num_emergency))
 
     for idx, (origin, destination) in enumerate(od_pairs):
+        is_emergency = idx in emergency_indices
         vehicle = {
             "vehicle_id": idx,
             "origin": origin,
             "destination": destination,
-            "type": "emergency" if idx in emergency_indices else "regular",
-            "priority_weight": 10 if idx in emergency_indices else 1
+            "type": "emergency" if is_emergency else "regular",
+            "priority_weight": 10 if is_emergency else 1,
+            "subtype": random.choice(_EMERGENCY_SUBTYPES) if is_emergency else "car",
         }
         vehicles.append(vehicle)
 

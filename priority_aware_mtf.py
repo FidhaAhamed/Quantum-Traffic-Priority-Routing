@@ -467,3 +467,213 @@ def compare_standard_vs_priority(vehicles, graph, method="neal", seed=42):
     comparison["aggregate_latency_increase_pct"] = latency_change
 
     return comparison
+
+# ==================================================
+# 5. CLASSICAL BASELINES FOR EVALUATION
+# ==================================================
+
+def dijkstra_baseline(vehicles, graph):
+    """
+    Classical Baseline #1: Independent Dijkstra Shortest Path.
+
+    Each vehicle independently gets the shortest path (by travel_time)
+    from origin to destination. No inter-vehicle coordination, no
+    priority awareness — pure classical shortest-path.
+
+    This is the simplest possible baseline and represents what a
+    standard GPS navigation system would do.
+
+    Returns:
+        selected_routes (dict): {vehicle_id: route}
+        metrics (dict): same structure as compute_solution_metrics
+    """
+    import networkx as nx
+    from copy import deepcopy
+
+    G = deepcopy(graph)
+    selected_routes = {}
+
+    for v in vehicles:
+        vid = v["vehicle_id"]
+        origin = v["origin"]
+        destination = v["destination"]
+        candidates = v.get("candidate_routes", [])
+
+        try:
+            path = nx.shortest_path(G, origin, destination, weight="travel_time")
+            selected_routes[vid] = path
+        except Exception:
+            # Fallback: use the first candidate route if Dijkstra fails
+            if candidates:
+                selected_routes[vid] = candidates[0]
+            else:
+                selected_routes[vid] = [origin, destination]
+
+    metrics = compute_solution_metrics(selected_routes, vehicles, graph)
+    return selected_routes, metrics
+
+
+def greedy_priority_baseline(vehicles, graph):
+    """
+    Classical Baseline #2: Greedy Priority-First Sequential Assignment.
+
+    Vehicles are sorted by priority weight (emergency first, then regular).
+    Each vehicle greedily picks the shortest candidate route given the
+    CURRENT congestion state, then congestion is updated before the next
+    vehicle picks.
+
+    This simulates a smart classical dispatcher that knows about priorities
+    but doesn't do joint optimization (no QUBO, no quantum).
+
+    Returns:
+        selected_routes (dict): {vehicle_id: route}
+        metrics (dict): same structure as compute_solution_metrics
+    """
+    from copy import deepcopy
+
+    G = deepcopy(graph)
+    selected_routes = {}
+
+    # Sort: emergency vehicles first (highest priority_weight first)
+    sorted_vehicles = sorted(
+        vehicles,
+        key=lambda v: v.get("priority_weight", 1),
+        reverse=True
+    )
+
+    for v in sorted_vehicles:
+        vid = v["vehicle_id"]
+        candidates = v.get("candidate_routes", [])
+
+        if not candidates:
+            selected_routes[vid] = [v["origin"], v["destination"]]
+            continue
+
+        # Pick the candidate route with lowest current travel time
+        best_route = None
+        best_cost = float("inf")
+
+        for route in candidates:
+            cost = compute_route_travel_time(route, G)
+            if cost < best_cost:
+                best_cost = cost
+                best_route = route
+
+        if best_route is None:
+            best_route = candidates[0]
+
+        selected_routes[vid] = best_route
+
+        # Update congestion on the graph so next vehicles see the load
+        for i in range(len(best_route) - 1):
+            u, w = best_route[i], best_route[i + 1]
+            if G.has_edge(u, w):
+                data = G[u][w]
+                if isinstance(data, dict) and 0 in data:
+                    data = data[0]
+                data["congestion"] = data.get("congestion", 0) + 1
+                # Recompute travel_time
+                length_km = data.get("length", 100) / 1000.0
+                speed_kmph = max(data.get("speed", 40), 1)
+                base_time = (length_km / speed_kmph) * 60
+                congestion_factor = 1.0 + (data["congestion"] / 20.0)
+                data["travel_time"] = base_time * congestion_factor
+
+    metrics = compute_solution_metrics(selected_routes, vehicles, graph)
+    return selected_routes, metrics
+
+
+def compare_all_methods(vehicles, graph, method="neal", seed=42):
+    """
+    Run ALL four methods on the same scenario and return a unified
+    comparison dictionary. This is used by evaluation.py and can
+    also be called from the Streamlit benchmark tab.
+
+    Methods compared:
+        1. Dijkstra Baseline (classical, independent shortest paths)
+        2. Greedy Priority-First (classical, sequential with priority)
+        3. Standard QUBO MTF (quantum-inspired, no priority weights)
+        4. Priority-Aware MTF (quantum-inspired, with ESV green corridors)
+
+    Returns:
+        dict with keys: dijkstra, greedy, standard_qubo, priority_mtf,
+              plus computed percentage improvements.
+    """
+    import time as _time
+    from copy import deepcopy
+
+    results = {}
+
+    # --- 1. Dijkstra Baseline ---
+    random.seed(seed)
+    np.random.seed(seed)
+    t0 = _time.time()
+    _, dij_metrics = dijkstra_baseline(vehicles, graph)
+    dij_time = _time.time() - t0
+    dij_metrics["solve_time_sec"] = round(dij_time, 3)
+    results["dijkstra"] = dij_metrics
+
+    # --- 2. Greedy Priority-First ---
+    random.seed(seed)
+    np.random.seed(seed)
+    t0 = _time.time()
+    _, greedy_metrics = greedy_priority_baseline(vehicles, graph)
+    greedy_time = _time.time() - t0
+    greedy_metrics["solve_time_sec"] = round(greedy_time, 3)
+    results["greedy"] = greedy_metrics
+
+    # --- 3. Standard QUBO MTF (all weights = 1, no priority) ---
+    random.seed(seed)
+    np.random.seed(seed)
+    standard_vehicles = deepcopy(vehicles)
+    for v in standard_vehicles:
+        v["priority_weight"] = 1
+
+    t0 = _time.time()
+    _, std_metrics = priority_aware_mtf_solve(
+        standard_vehicles, graph,
+        method=method,
+        emergency_boost=1.0,
+    )
+    std_time = _time.time() - t0
+    std_metrics["solve_time_sec"] = round(std_time, 3)
+    results["standard_qubo"] = std_metrics
+
+    # --- 4. Priority-Aware MTF (the main contribution) ---
+    random.seed(seed)
+    np.random.seed(seed)
+    t0 = _time.time()
+    _, pri_metrics = priority_aware_mtf_solve(
+        vehicles, graph,
+        method=method,
+        emergency_boost=10.0,
+    )
+    pri_time = _time.time() - t0
+    pri_metrics["solve_time_sec"] = round(pri_time, 3)
+    results["priority_mtf"] = pri_metrics
+
+    # --- Percentage Improvements (Priority MTF vs each baseline) ---
+    for baseline_key in ["dijkstra", "greedy", "standard_qubo"]:
+        bl = results[baseline_key]
+        pr = results["priority_mtf"]
+
+        if bl["esv_avg_travel_time"] > 0:
+            esv_improv = (
+                (bl["esv_avg_travel_time"] - pr["esv_avg_travel_time"])
+                / bl["esv_avg_travel_time"] * 100
+            )
+        else:
+            esv_improv = 0.0
+
+        if bl["aggregate_network_latency"] > 0:
+            lat_change = (
+                (pr["aggregate_network_latency"] - bl["aggregate_network_latency"])
+                / bl["aggregate_network_latency"] * 100
+            )
+        else:
+            lat_change = 0.0
+
+        results[f"esv_reduction_vs_{baseline_key}_pct"] = round(esv_improv, 2)
+        results[f"latency_change_vs_{baseline_key}_pct"] = round(lat_change, 2)
+
+    return results
